@@ -1,110 +1,125 @@
-import requests
+import pandas as pd
+from typing import Dict, Any
 from CommonBroker import CommonBroker
-
+import yfinance as yf
 
 class IOLClient(CommonBroker):
-    def __init__(self, **kwargs):
-        self.usuario = kwargs.get('usuario')
-        self.contrasena = kwargs.get('contrasena')
-        self.CUENTA_USA = kwargs.get('CUENTA_USA') or False
-        self.access_token = None
-        self.refresh_token = None
-        
-        
-    def _init_tokens(self):
-        url = "https://api.invertironline.com/token"
-        payload = {
-            "grant_type": "password",
-            "username": self.usuario,
-            "password": self.contrasena,
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        
-        response = requests.post(url, data=payload, headers=headers)
-        response.raise_for_status()
-        tokens = response.json()
-        self.access_token = tokens["access_token"]
-        self.refresh_token = tokens["refresh_token"]
-
-
-    def _reset_tokens(self):
-        url = "https://api.invertironline.com/token"
-        payload = {
-            "grant_type": "refresh_token",
-            "refresh_token": self.refresh_token
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        
-        response = requests.post(url, data=payload, headers=headers)
-        response.raise_for_status()
-        tokens = response.json()
-        self.access_token = tokens["access_token"]
-        self.refresh_token = tokens["refresh_token"]
-
-
-    def _asegurar_token_valido(self): # type: ignore
-        if not self.access_token:
-            self._init_tokens()
-        try:
-            return self.access_token
-        except requests.exceptions.HTTPError:
-            self._reset_tokens()
-            return self.access_token
-
-    def request_portfolio(self, usa: bool = False):
-        url = "https://api.invertironline.com/api/v2/portafolio/argentina"
-        if usa:
-            url = "https://api.invertironline.com/api/v2/portafolio/estados_Unidos"
-        headers = {
-            "Authorization": f"Bearer {self._asegurar_token_valido()}"
-        }
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()
+    def __init__(self):
+        super().__init__()
     
-    def _process_asset(self, activo):
-        """Procesa un activo individual y retorna el formato estandarizado"""
-        # Determinar si necesitamos convertir la moneda
-        needs_conversion = activo['titulo']['moneda'].lower() == 'peso_argentino'
+    def _obtener_simbolo(self, row) -> str:
+        """Procesa el símbolo para tener un formato consistente"""
+        simbolo = str(row['Simbolo']).split()[0]
+        if str(row['Moneda']).upper() == "USD":
+            # caso Citigroup "C.D"
+            if simbolo.endswith(".D"):
+                return simbolo[:-2]
+            # Elimina la "D" de los tickers de Cedears en dólares
+            # Ej "NVDAD" en dolares -> NVDA en dolares
+            if simbolo.endswith("D"):
+                return simbolo[:-1]
+        return simbolo
+
+    def _process_transactions(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Procesa las transacciones y calcula el portfolio actual"""
+        # Limpiar y preparar datos
+        df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce')
+        df['Precio Ponderado'] = pd.to_numeric(df['Precio Ponderado'], errors='coerce')
         
-        # Convertir precios si es necesario
-        price = activo['ultimoPrecio']
-        total_value = activo['valorizado']
+        # Procesar símbolos
+        df['Simbolo'] = df.apply(self._obtener_simbolo, axis=1)
         
-        if needs_conversion:
-            price = self.pesosToUsdCCL(price)
-            total_value = self.pesosToUsdCCL(total_value)
+        # Calcular posiciones actuales
+        positions = df.groupby('Simbolo').agg({
+            'Descripción': 'first',
+            'Cantidad': 'sum',
+            'Moneda': 'first',
+            'Precio Ponderado': 'mean',
+            'Mercado': 'first'  # Agregamos el mercado al agrupamiento
+        }).reset_index()
+        
+        # Filtrar solo posiciones actuales
+        positions = positions[positions['Cantidad'] != 0]
+        
+        return positions
+
+    def _calculate_portfolio(self, positions: pd.DataFrame) -> pd.DataFrame:
+        """Convierte las posiciones al formato estándar"""
+        portfolio = pd.DataFrame(columns=self.PORTFOLIO_COLUMNS)
+        
+        for _, row in positions.iterrows():
+            price = row['Precio Ponderado']
+            if row['Moneda'].lower() == 'peso argentino':
+                price = self.pesosToUsdCCL(price)
             
-        price_change_usd = price * (activo['variacionDiaria'] / 100)
+            total_value = price * row['Cantidad']
+            
+            portfolio = pd.concat([portfolio, pd.DataFrame([{
+                'Ticker': row['Simbolo'],
+                'Name': row['Descripción'],
+                'Price (USD)': price,
+                'Quantity': row['Cantidad'],
+                'Price Change (USD)': 0,
+                'Price Change (%)': 0,
+                'Total Value (USD)': total_value,
+                'Market': row['Mercado']  # Agregamos el mercado al portfolio
+            }])], ignore_index=True)
         
-        return {
-            'Ticker': activo['titulo']['simbolo'],
-            'Name': activo['titulo']['descripcion'],
-            'Price (USD)': price,
-            'Quantity': activo['cantidad'],
-            'Price Change (USD)': price_change_usd,
-            'Price Change (%)': activo['variacionDiaria'],
-            'Total Value (USD)': total_value
-        }
+        return portfolio
 
-    def _process_portfolio(self, portfolio):
-        """Procesa una cartera completa y retorna lista de activos en formato estandarizado"""
-        result = []
-        if portfolio and 'activos' in portfolio:
-            for activo in portfolio['activos']:
-                result.append(self._process_asset(activo))
-        return result
+    def _obtener_precio_actual(self, ticker: str, mercado: str) -> float:
+        """
+        Obtiene el precio actual de un ticker según el mercado
+        """
+        try:
+            if mercado.upper() == 'BCBA':
+                # Ajustar ticker para acciones argentinas
+                yf_ticker = f"{ticker}.BA"
+                stock = yf.Ticker(yf_ticker)
+                current_price = stock.info['regularMarketPreviousClose']
+                return float(current_price)
+            else:
+                # Para otros mercados (NYSE, NASDAQ), usar el ticker directo
+                stock = yf.Ticker(ticker)
+                current_price = stock.info['regularMarketPreviousClose']
+                return float(current_price)
+        except Exception as e:
+            print(f"Error obteniendo precio para {ticker}: {e}")
+            return 0.0
 
-    def getPortfolio(self):
-        """Obtiene y combina los portfolios de Argentina y USA"""
-        portfolio = self.request_portfolio()
-        portfolio_usa = self.request_portfolio(usa=self.CUENTA_USA)
+    def _set_price_changes(self, portfolio: pd.DataFrame) -> pd.DataFrame:
+        """Setea los cambios de precio (% y USD) en el portfolio"""
+        for index, row in portfolio.iterrows():
+            # Usar el mercado específico de cada activo
+            current_price = self._obtener_precio_actual(row['Ticker'], row['Market'])
+            if current_price > 0:
+                if row['Moneda'].lower() == 'peso argentino':
+                    current_price = self.pesosToUsdCCL(current_price)
+                
+                original_price = row['Price (USD)']
+                price_change_usd = current_price - original_price
+                price_change_pct = (price_change_usd / original_price) * 100 if original_price > 0 else 0
+                
+                portfolio.at[index, 'Price (USD)'] = current_price
+                portfolio.at[index, 'Price Change (USD)'] = price_change_usd
+                portfolio.at[index, 'Price Change (%)'] = price_change_pct
+                portfolio.at[index, 'Total Value (USD)'] = current_price * row['Quantity']
         
-        result = []
-        result.extend(self._process_portfolio(portfolio))
-        result.extend(self._process_portfolio(portfolio_usa))
+        return portfolio.drop('Market', axis=1)  # Eliminamos la columna Market al final
+
+    def getPortfolio(self, file_path: str) -> pd.DataFrame:
+        """Lee y procesa un archivo de transacciones de IOL"""
+        # Leer archivo
+        df = self.read_file(file_path)
         
-        return result
+        # Procesar transacciones
+        positions = self._process_transactions(df)
+        
+        # Convertir a formato estándar
+        portfolio = self._calculate_portfolio(positions)
+        
+        # Actualizar precios y cambios
+        return self._set_price_changes(portfolio)
 
 
 
