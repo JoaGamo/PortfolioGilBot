@@ -111,54 +111,54 @@ class IOLClient(CommonBroker):
         
         return portfolio
 
-    def _obtener_precio_actual(self, ticker: str, mercado: str) -> float:
-        """
-        Obtiene el precio actual de un ticker según el mercado
-        """
+    def _obtener_precio_actual(self, ticker: str, market: str) -> tuple:
+        """Obtiene el precio actual y previous close de un ticker"""
         try:
-            if (mercado.upper() == 'BCBA'):
-                # Ajustar ticker para acciones argentinas
-                yf_ticker = f"{ticker}.BA"
-                stock = yf.Ticker(yf_ticker)
-                current_price = stock.info['regularMarketPreviousClose']
-                return float(current_price)
-            else:
-                # Para otros mercados (NYSE, NASDAQ), usar el ticker directo
-                stock = yf.Ticker(ticker)
-                current_price = stock.info['regularMarketPreviousClose']
-                return float(current_price)
+            if market.upper() == 'BCBA':
+                ticker = f"{ticker}.BA"
+            stock = yf.Ticker(ticker)
+            current_price = stock.fast_info.get('lastPrice')
+            prev_close = stock.fast_info.get('previousClose')
+            return float(current_price), float(prev_close)  # type: ignore
         except Exception as e:
             print(f"Error obteniendo precio para {ticker}: {e}")
-            return 0.0
+            return 0.0, 0.0
+        
 
     def _set_price_changes(self, portfolio: pd.DataFrame) -> pd.DataFrame:
         """Setea los cambios de precio (% y USD) en el portfolio"""
         for index, row in portfolio.iterrows():
             # Obtener precio actual según el mercado y convertir a USD si es necesario
-            current_price = self._obtener_precio_actual(row['Ticker'], row['Market'])
+            current_price, prev_close = self._obtener_precio_actual(row['Ticker'], row['Market'])
             print(f"Precio actual de {row['Ticker']}: {current_price}")
             
             if current_price > 0:
                 # Convertir a USD solo si el precio viene del mercado BCBA
                 if row['Market'].upper() == 'BCBA':
                     current_price = self.pesosToUsdCCL(current_price)
-                    print(f"Precio actual en USD de {row['Ticker']}: {current_price}")
+                    prev_close = self.pesosToUsdCCL(prev_close)
                 
-                original_price = row['Price (USD)']
-                print(f"Precio original en USD de {row['Ticker']}: {original_price}")
-                
-                price_change_usd = current_price - original_price
-                price_change_pct = (price_change_usd / original_price) * 100 if original_price > 0 else 0
-                
-                portfolio.at[index, 'Price (USD)'] = current_price
-                portfolio.at[index, 'Price Change (USD)'] = price_change_usd
-                portfolio.at[index, 'Price Change (%)'] = price_change_pct
-                portfolio.at[index, 'Total Value (USD)'] = current_price * row['Quantity']
-        
+            intraday_change_usd = current_price - prev_close
+            intraday_change_pct = (intraday_change_usd / prev_close) * 100 if prev_close > 0 else 0
+            
+            # Calcular cambio desde la compra original
+            original_price = row['Price (USD)']
+            print(f"Precio original en USD de {row['Ticker']}: {original_price}")
+            
+            #price_change_usd = current_price - original_price
+            #price_change_pct = (price_change_usd / original_price) * 100 if original_price > 0 else 0
+            
+            portfolio.at[index, 'Price (USD)'] = current_price
+            #portfolio.at[index, 'Price Change (USD)'] = price_change_usd
+            #portfolio.at[index, 'Price Change (%)'] = price_change_pct
+            portfolio.at[index, 'Price Change (USD)'] = intraday_change_usd
+            portfolio.at[index, 'Price Change (%)'] = intraday_change_pct
+            portfolio.at[index, 'Total Value (USD)'] = current_price * row['Quantity']
+    
         return portfolio.drop('Market', axis=1)
 
     def getPortfolio(self, file_path: str) -> pd.DataFrame:
-        """Lee y procesa un archivo de transacciones de IOL"""
+        """Lee y procesa un archivo de operaciones de IOL"""
         df = self.read_file(file_path)
         positions = self._process_transactions(df)
         
