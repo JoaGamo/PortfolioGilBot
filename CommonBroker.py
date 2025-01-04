@@ -10,18 +10,57 @@ class CommonBroker(ABC):
     
     @abstractmethod
     def getPortfolio(self, file_path: str) -> pd.DataFrame:
-        """
-        Retorna el portafolio del broker desde un archivo CSV/XLS
-        Debe retornar un DataFrame con las columnas definidas en PORTFOLIO_COLUMNS
+        """Lee el portafolio desde un archivo y retorna un DataFrame normalizado.
+
+        Args:
+            file_path (str): Ruta al archivo de portafolio (CSV/XLS)
+
+        Returns:
+            pd.DataFrame: DataFrame con las siguientes columnas:
+                - Ticker (str): Símbolo del instrumento
+                - Name (str): Nombre descriptivo del instrumento
+                - Price (USD) (float): Precio actual en dólares
+                - Quantity (float): Cantidad de unidades
+                - Price Change (USD) (float): Cambio absoluto del precio en USD
+                - Price Change (%) (float): Cambio porcentual del precio
+                - Total Value (USD) (float): Valor total de la posición en USD
         """
         pass
     
     def read_file(self, file_path: str) -> pd.DataFrame:
         """Lee un archivo CSV o XLS y retorna un DataFrame"""
         if file_path.endswith('.csv'):
-            return pd.read_csv(file_path)
+            return pd.read_csv(file_path, decimal=',', thousands='.')
         elif file_path.endswith(('.xls', '.xlsx')):
-            return pd.read_excel(file_path)
+            try:
+                return pd.read_excel(file_path, decimal=',', thousands='.')
+            except ValueError as e:
+                # El "XLS" de IOL en realidad es un HTML
+                # Definimos las columnas que sabemos que tiene el archivo
+                cols = [
+                    'Fecha Transacción',
+                    'Fecha Liquidación',
+                    'Boleto',
+                    'Mercado',
+                    'Tipo Transacción',
+                    'Numero de Cuenta',
+                    'Descripción',
+                    'Especie',
+                    'Simbolo',
+                    'Cantidad',
+                    'Moneda',
+                    'Precio Ponderado',
+                    'Monto',
+                    'Comisión y Derecho de Mercado',
+                    'Iva Impuesto',
+                    'Total'
+                ]
+                # Leemos la tabla con las opciones de formato numérico
+                df = pd.read_html(file_path, encoding='utf-8', decimal=',', thousands='.')[0]
+                df.columns = cols
+                print(df)
+                return df
+                
         raise ValueError("Formato de archivo no soportado. Use CSV o XLS/XLSX")
 
     def pesosToUsdCCL(self, pesos: float) -> float:
