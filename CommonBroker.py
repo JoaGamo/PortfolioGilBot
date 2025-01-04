@@ -35,7 +35,7 @@ class CommonBroker(ABC):
             try:
                 return pd.read_excel(file_path, decimal=',', thousands='.')
             except ValueError as e:
-                # El "XLS" de IOL en realidad es un HTML/XML
+                # El "XLS" de IOL en realidad es un HTML
                 # Definimos las columnas que sabemos que tiene el archivo
                 cols = [
                     'Fecha Transacción',

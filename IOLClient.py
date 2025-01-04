@@ -1,11 +1,6 @@
-# Imports de la biblioteca estándar
 from typing import Dict, Any
-
-# Imports de terceros
 import pandas as pd
 import yfinance as yf
-
-# Imports locales
 from CommonBroker import CommonBroker
 
 class IOLClient(CommonBroker):
@@ -23,6 +18,7 @@ class IOLClient(CommonBroker):
                 return simbolo[:-2]
             # Elimina la "D" de los tickers de Cedears en dólares
             # Ej "NVDAD" en dolares -> NVDA en dolares
+            # Si no hacemos esto, veremos el portfolio con tickers repetidos, NVDA y NVDAD por ejemplo
             if simbolo.endswith("D"):
                 return simbolo[:-1]
         return simbolo
