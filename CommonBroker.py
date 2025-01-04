@@ -21,7 +21,34 @@ class CommonBroker(ABC):
         if file_path.endswith('.csv'):
             return pd.read_csv(file_path)
         elif file_path.endswith(('.xls', '.xlsx')):
-            return pd.read_excel(file_path)
+            try:
+                return pd.read_excel(file_path)
+            except ValueError as e:
+                # El "XLS" de IOL en realidad es un HTML/XML
+                # Definimos las columnas que sabemos que tiene el archivo
+                cols = [
+                    'Fecha Transaccion',
+                    'Fecha Liquidacion',
+                    'Boleto',
+                    'Mercado',
+                    'Tipo Transaccion',
+                    'Numero Cuenta',
+                    'Descripcion',
+                    'Especie',
+                    'Simbolo',
+                    'Cantidad',
+                    'Moneda',
+                    'Precio Ponderado',
+                    'Monto',
+                    'Comision',
+                    'Iva',
+                    'Total'
+                ]
+                # Leemos la tabla y asignamos los nombres de columnas
+                df = pd.read_html(file_path, encoding='utf-8')[1]  # La tabla que queremos es la segunda (índice 1)
+                df.columns = cols
+                return df
+                
         raise ValueError("Formato de archivo no soportado. Use CSV o XLS/XLSX")
 
     def pesosToUsdCCL(self, pesos: float) -> float:

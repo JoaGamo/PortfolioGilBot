@@ -1,4 +1,3 @@
-import os
 from IOLClient import IOLClient
 
 def create_client(client_type="IOL"):

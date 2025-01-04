@@ -1,7 +1,12 @@
-import pandas as pd
+# Imports de la biblioteca estándar
 from typing import Dict, Any
-from CommonBroker import CommonBroker
+
+# Imports de terceros
+import pandas as pd
 import yfinance as yf
+
+# Imports locales
+from CommonBroker import CommonBroker
 
 class IOLClient(CommonBroker):
     def __init__(self):
@@ -20,25 +25,70 @@ class IOLClient(CommonBroker):
                 return simbolo[:-1]
         return simbolo
 
+    def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Normaliza los nombres de las columnas para el procesamiento"""
+        # Los nombres ya vienen correctos del read_file, solo reemplazamos espacios por _
+        df.columns = [col.replace(' ', '_') for col in df.columns]
+        return df
+
     def _process_transactions(self, df: pd.DataFrame) -> pd.DataFrame:
         """Procesa las transacciones y calcula el portfolio actual"""
+        # Debug: imprimir nombres de columnas
+        print("Columnas disponibles:", df.columns.tolist())
+        
+        # Normalizar nombres de columnas
+        df = self._normalize_columns(df)
+        print("Columnas normalizadas:", df.columns.tolist())
+        
         # Limpiar y preparar datos
         df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce')
-        df['Precio Ponderado'] = pd.to_numeric(df['Precio Ponderado'], errors='coerce')
+        df['Precio_Ponderado'] = pd.to_numeric(df['Precio_Ponderado'], errors='coerce')
+        df['Monto'] = df['Cantidad'] * df['Precio_Ponderado']
+        
+        # Ajustar cantidades según tipo de transacción
+        df['Cantidad_Ajustada'] = df.apply(lambda row: 
+            -row['Cantidad'] if row['Tipo Transaccion'] in ['Venta', 'Rescate FCI']
+            else row['Cantidad'], axis=1)
         
         # Procesar símbolos
         df['Simbolo'] = df.apply(self._obtener_simbolo, axis=1)
         
+        # Crear DataFrame solo con compras para calcular precio promedio
+        compras_df = df[df['Tipo_Transaccion'].isin(['Compra', 'Suscripción FCI'])].copy()
+        
+        # Calcular precio promedio ponderado de compras
+        precios_promedio = (compras_df.groupby('Simbolo')
+                          .agg({
+                              'Monto': 'sum',
+                              'Cantidad': 'sum'
+                          })
+                          .assign(Precio_Promedio=lambda x: x['Monto'] / x['Cantidad'])
+                          ['Precio_Promedio'])
+        
+        # Ajustar cantidades según tipo de transacción para el total
+        df['Cantidad_Ajustada'] = df.apply(lambda row: 
+            -row['Cantidad'] if row['Tipo Transacción'] in ['Venta', 'Rescate FCI']
+            else row['Cantidad'], axis=1)
+        
         # Calcular posiciones actuales
         positions = df.groupby('Simbolo').agg({
             'Descripción': 'first',
-            'Cantidad': 'sum',
+            'Cantidad_Ajustada': 'sum',
             'Moneda': 'first',
-            'Precio Ponderado': 'mean',
-            'Mercado': 'first'  # Agregamos el mercado al agrupamiento
+            'Mercado': 'first'
         }).reset_index()
         
-        # Filtrar solo posiciones actuales
+        # Agregar precio promedio de compra a las posiciones
+        positions = positions.merge(
+            precios_promedio.reset_index(),
+            on='Simbolo',
+            how='left'
+        ).rename(columns={
+            'Cantidad_Ajustada': 'Cantidad',
+            'Precio_Promedio': 'Precio Ponderado'
+        })
+        
+        # Filtrar solo posiciones actuales con cantidad distinta de 0
         positions = positions[positions['Cantidad'] != 0]
         
         return positions
@@ -72,7 +122,7 @@ class IOLClient(CommonBroker):
         Obtiene el precio actual de un ticker según el mercado
         """
         try:
-            if mercado.upper() == 'BCBA':
+            if (mercado.upper() == 'BCBA'):
                 # Ajustar ticker para acciones argentinas
                 yf_ticker = f"{ticker}.BA"
                 stock = yf.Ticker(yf_ticker)
@@ -120,6 +170,11 @@ class IOLClient(CommonBroker):
         
         # Actualizar precios y cambios
         return self._set_price_changes(portfolio)
+
+
+
+
+
 
 
 

@@ -1,0 +1,6 @@
+pandas
+requests
+yfinance
+multitasking
+openpyxl
+xlrd
