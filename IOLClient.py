@@ -15,7 +15,9 @@ class IOLClient(CommonBroker):
     def _obtener_simbolo(self, row) -> str:
         """Procesa el símbolo para tener un formato consistente"""
         simbolo = str(row['Simbolo']).split()[0]
-        if str(row['Moneda']).upper() == "USD":
+        print("Simbolo a operar:", simbolo)
+        print("Moneda:", row['Moneda'])
+        if str(row['Moneda']).upper() == "US$":
             # caso Citigroup "C.D"
             if simbolo.endswith(".D"):
                 return simbolo[:-2]
@@ -25,38 +27,41 @@ class IOLClient(CommonBroker):
                 return simbolo[:-1]
         return simbolo
 
-    def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normaliza los nombres de las columnas para el procesamiento"""
-        # Los nombres ya vienen correctos del read_file, solo reemplazamos espacios por _
-        df.columns = [col.replace(' ', '_') for col in df.columns]
-        return df
 
     def _process_transactions(self, df: pd.DataFrame) -> pd.DataFrame:
         """Procesa las transacciones y calcula el portfolio actual"""
-        # Debug: imprimir nombres de columnas
         print("Columnas disponibles:", df.columns.tolist())
         
-        # Normalizar nombres de columnas
-        df = self._normalize_columns(df)
-        print("Columnas normalizadas:", df.columns.tolist())
-        
-        # Limpiar y preparar datos
+        # Convertir columnas numéricas - sin modificar los separadores decimales
         df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce')
-        df['Precio_Ponderado'] = pd.to_numeric(df['Precio_Ponderado'], errors='coerce')
-        df['Monto'] = df['Cantidad'] * df['Precio_Ponderado']
+        df['Precio Ponderado'] = pd.to_numeric(df['Precio Ponderado'], errors='coerce')
+        
+        # Evitar notación científica
+        pd.set_option('display.float_format', lambda x: '%.2f' % x)
+        
+        # Convertir precios a USD si están en ARS
+        df['Precio USD'] = df.apply(
+            lambda row: self.pesosToUsdCCL(row['Precio Ponderado']) 
+            if row['Moneda'].upper() == 'AR$' 
+            else row['Precio Ponderado'], 
+            axis=1
+        )
+        
+        df['Monto'] = df['Cantidad'] * df['Precio USD']
         
         # Ajustar cantidades según tipo de transacción
         df['Cantidad_Ajustada'] = df.apply(lambda row: 
-            -row['Cantidad'] if row['Tipo Transaccion'] in ['Venta', 'Rescate FCI']
+            -row['Cantidad'] if row['Tipo Transacción'] in ['Venta', 'Rescate FCI']
             else row['Cantidad'], axis=1)
         
-        # Procesar símbolos
+        # Procesar símbolos y filtrar cauciones
         df['Simbolo'] = df.apply(self._obtener_simbolo, axis=1)
+        df = df[~df['Simbolo'].str.contains('Caución', na=False, case=False)]
         
         # Crear DataFrame solo con compras para calcular precio promedio
-        compras_df = df[df['Tipo_Transaccion'].isin(['Compra', 'Suscripción FCI'])].copy()
+        compras_df = df[df['Tipo Transacción'].isin(['Compra', 'Suscripción FCI'])].copy()
         
-        # Calcular precio promedio ponderado de compras
+        # Calcular precio promedio ponderado de compras en USD
         precios_promedio = (compras_df.groupby('Simbolo')
                           .agg({
                               'Monto': 'sum',
@@ -65,16 +70,10 @@ class IOLClient(CommonBroker):
                           .assign(Precio_Promedio=lambda x: x['Monto'] / x['Cantidad'])
                           ['Precio_Promedio'])
         
-        # Ajustar cantidades según tipo de transacción para el total
-        df['Cantidad_Ajustada'] = df.apply(lambda row: 
-            -row['Cantidad'] if row['Tipo Transacción'] in ['Venta', 'Rescate FCI']
-            else row['Cantidad'], axis=1)
-        
         # Calcular posiciones actuales
         positions = df.groupby('Simbolo').agg({
             'Descripción': 'first',
             'Cantidad_Ajustada': 'sum',
-            'Moneda': 'first',
             'Mercado': 'first'
         }).reset_index()
         
@@ -84,13 +83,18 @@ class IOLClient(CommonBroker):
             on='Simbolo',
             how='left'
         ).rename(columns={
-            'Cantidad_Ajustada': 'Cantidad',
-            'Precio_Promedio': 'Precio Ponderado'
+            'Cantidad_Ajustada': 'Quantity',
+            'Precio_Promedio': 'Price (USD)',
+            'Descripción': 'Name'
         })
         
         # Filtrar solo posiciones actuales con cantidad distinta de 0
-        positions = positions[positions['Cantidad'] != 0]
+        positions = positions[positions['Quantity'] != 0]
         
+        print("\nPosiciones actuales (valores exactos):")
+        for _, row in positions.iterrows():
+            print(f"{row['Simbolo']}: {row['Quantity']} @ {row['Price (USD)']}")
+            
         return positions
 
     def _calculate_portfolio(self, positions: pd.DataFrame) -> pd.DataFrame:
@@ -98,21 +102,15 @@ class IOLClient(CommonBroker):
         portfolio = pd.DataFrame(columns=self.PORTFOLIO_COLUMNS)
         
         for _, row in positions.iterrows():
-            price = row['Precio Ponderado']
-            if row['Moneda'].lower() == 'peso argentino':
-                price = self.pesosToUsdCCL(price)
-            
-            total_value = price * row['Cantidad']
-            
             portfolio = pd.concat([portfolio, pd.DataFrame([{
                 'Ticker': row['Simbolo'],
-                'Name': row['Descripción'],
-                'Price (USD)': price,
-                'Quantity': row['Cantidad'],
+                'Name': row['Name'],
+                'Price (USD)': row['Price (USD)'],
+                'Quantity': row['Quantity'],
                 'Price Change (USD)': 0,
                 'Price Change (%)': 0,
-                'Total Value (USD)': total_value,
-                'Market': row['Mercado']  # Agregamos el mercado al portfolio
+                'Total Value (USD)': row['Price (USD)'] * row['Quantity'],
+                'Market': row['Mercado']
             }])], ignore_index=True)
         
         return portfolio
@@ -140,13 +138,19 @@ class IOLClient(CommonBroker):
     def _set_price_changes(self, portfolio: pd.DataFrame) -> pd.DataFrame:
         """Setea los cambios de precio (% y USD) en el portfolio"""
         for index, row in portfolio.iterrows():
-            # Usar el mercado específico de cada activo
+            # Obtener precio actual según el mercado y convertir a USD si es necesario
             current_price = self._obtener_precio_actual(row['Ticker'], row['Market'])
+            print(f"Precio actual de {row['Ticker']}: {current_price}")
+            
             if current_price > 0:
-                if row['Moneda'].lower() == 'peso argentino':
+                # Convertir a USD solo si el precio viene del mercado BCBA
+                if row['Market'].upper() == 'BCBA':
                     current_price = self.pesosToUsdCCL(current_price)
+                    print(f"Precio actual en USD de {row['Ticker']}: {current_price}")
                 
                 original_price = row['Price (USD)']
+                print(f"Precio original en USD de {row['Ticker']}: {original_price}")
+                
                 price_change_usd = current_price - original_price
                 price_change_pct = (price_change_usd / original_price) * 100 if original_price > 0 else 0
                 
@@ -155,20 +159,16 @@ class IOLClient(CommonBroker):
                 portfolio.at[index, 'Price Change (%)'] = price_change_pct
                 portfolio.at[index, 'Total Value (USD)'] = current_price * row['Quantity']
         
-        return portfolio.drop('Market', axis=1)  # Eliminamos la columna Market al final
+        return portfolio.drop('Market', axis=1)
 
     def getPortfolio(self, file_path: str) -> pd.DataFrame:
         """Lee y procesa un archivo de transacciones de IOL"""
-        # Leer archivo
         df = self.read_file(file_path)
-        
-        # Procesar transacciones
         positions = self._process_transactions(df)
         
         # Convertir a formato estándar
         portfolio = self._calculate_portfolio(positions)
         
-        # Actualizar precios y cambios
         return self._set_price_changes(portfolio)
 
 

@@ -30,34 +30,35 @@ class CommonBroker(ABC):
     def read_file(self, file_path: str) -> pd.DataFrame:
         """Lee un archivo CSV o XLS y retorna un DataFrame"""
         if file_path.endswith('.csv'):
-            return pd.read_csv(file_path)
+            return pd.read_csv(file_path, decimal=',', thousands='.')
         elif file_path.endswith(('.xls', '.xlsx')):
             try:
-                return pd.read_excel(file_path)
+                return pd.read_excel(file_path, decimal=',', thousands='.')
             except ValueError as e:
                 # El "XLS" de IOL en realidad es un HTML/XML
                 # Definimos las columnas que sabemos que tiene el archivo
                 cols = [
-                    'Fecha Transaccion',
-                    'Fecha Liquidacion',
+                    'Fecha Transacción',
+                    'Fecha Liquidación',
                     'Boleto',
                     'Mercado',
-                    'Tipo Transaccion',
-                    'Numero Cuenta',
-                    'Descripcion',
+                    'Tipo Transacción',
+                    'Numero de Cuenta',
+                    'Descripción',
                     'Especie',
                     'Simbolo',
                     'Cantidad',
                     'Moneda',
                     'Precio Ponderado',
                     'Monto',
-                    'Comision',
-                    'Iva',
+                    'Comisión y Derecho de Mercado',
+                    'Iva Impuesto',
                     'Total'
                 ]
-                # Leemos la tabla y asignamos los nombres de columnas
-                df = pd.read_html(file_path, encoding='utf-8')[1]  # La tabla que queremos es la segunda (índice 1)
+                # Leemos la tabla con las opciones de formato numérico
+                df = pd.read_html(file_path, encoding='utf-8', decimal=',', thousands='.')[0]
                 df.columns = cols
+                print(df)
                 return df
                 
         raise ValueError("Formato de archivo no soportado. Use CSV o XLS/XLSX")
