@@ -10,9 +10,20 @@ class CommonBroker(ABC):
     
     @abstractmethod
     def getPortfolio(self, file_path: str) -> pd.DataFrame:
-        """
-        Retorna el portafolio del broker desde un archivo CSV/XLS
-        Debe retornar un DataFrame con las columnas definidas en PORTFOLIO_COLUMNS
+        """Lee el portafolio desde un archivo y retorna un DataFrame normalizado.
+
+        Args:
+            file_path (str): Ruta al archivo de portafolio (CSV/XLS)
+
+        Returns:
+            pd.DataFrame: DataFrame con las siguientes columnas:
+                - Ticker (str): Símbolo del instrumento
+                - Name (str): Nombre descriptivo del instrumento
+                - Price (USD) (float): Precio actual en dólares
+                - Quantity (float): Cantidad de unidades
+                - Price Change (USD) (float): Cambio absoluto del precio en USD
+                - Price Change (%) (float): Cambio porcentual del precio
+                - Total Value (USD) (float): Valor total de la posición en USD
         """
         pass
     
