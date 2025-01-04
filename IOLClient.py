@@ -141,16 +141,7 @@ class IOLClient(CommonBroker):
             intraday_change_usd = current_price - prev_close
             intraday_change_pct = (intraday_change_usd / prev_close) * 100 if prev_close > 0 else 0
             
-            # Calcular cambio desde la compra original
-            original_price = row['Price (USD)']
-            print(f"Precio original en USD de {row['Ticker']}: {original_price}")
-            
-            #price_change_usd = current_price - original_price
-            #price_change_pct = (price_change_usd / original_price) * 100 if original_price > 0 else 0
-            
             portfolio.at[index, 'Price (USD)'] = current_price
-            #portfolio.at[index, 'Price Change (USD)'] = price_change_usd
-            #portfolio.at[index, 'Price Change (%)'] = price_change_pct
             portfolio.at[index, 'Price Change (USD)'] = intraday_change_usd
             portfolio.at[index, 'Price Change (%)'] = intraday_change_pct
             portfolio.at[index, 'Total Value (USD)'] = current_price * row['Quantity']

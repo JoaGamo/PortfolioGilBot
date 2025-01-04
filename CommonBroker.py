@@ -10,7 +10,7 @@ class CommonBroker(ABC):
     
     @abstractmethod
     def getPortfolio(self, file_path: str) -> pd.DataFrame:
-        """Lee el portafolio desde un archivo y retorna un DataFrame normalizado.
+        """Lee el portafolio desde un archivo y retorna un DataFrame.
 
         Args:
             file_path (str): Ruta al archivo de portafolio (CSV/XLS)
@@ -37,6 +37,8 @@ class CommonBroker(ABC):
             except ValueError as e:
                 # El "XLS" de IOL en realidad es un HTML
                 # Definimos las columnas que sabemos que tiene el archivo
+                # TODO: Podríamos, en realidad, preguntar al usuario de qué broker es el archivo
+                # Y, en base a esa información, saber qué columnas esperar
                 cols = [
                     'Fecha Transacción',
                     'Fecha Liquidación',
@@ -55,7 +57,6 @@ class CommonBroker(ABC):
                     'Iva Impuesto',
                     'Total'
                 ]
-                # Leemos la tabla con las opciones de formato numérico
                 df = pd.read_html(file_path, encoding='utf-8', decimal=',', thousands='.')[0]
                 df.columns = cols
                 print(df)
