@@ -9,7 +9,7 @@ class CommonBroker(ABC):
     ]
     
     @abstractmethod
-    def getPortfolio(self, file_path: str) -> pd.DataFrame:
+    def get_portfolio(self, file_path: str) -> pd.DataFrame:
         """Lee el portafolio desde un archivo y retorna un DataFrame.
 
         Args:
@@ -64,7 +64,7 @@ class CommonBroker(ABC):
                 
         raise ValueError("Formato de archivo no soportado. Use CSV o XLS/XLSX")
 
-    def pesosToUsdCCL(self, pesos: float) -> float:
+    def pesos_to_usdCCL(self, pesos: float) -> float:
         """Convierte pesos argentinos a USD CCL"""
         url = 'https://dolarapi.com/v1/dolares/contadoconliqui'
         response = requests.get(url)

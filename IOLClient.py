@@ -26,9 +26,9 @@ class IOLClient(CommonBroker):
 
     def _process_transactions(self, df: pd.DataFrame) -> pd.DataFrame:
         """Procesa las transacciones y calcula el portfolio actual"""
-        print("Columnas disponibles:", df.columns.tolist())
+        # TODO: No estamos considerando Splits!
+        # El archivo importado de IOL no tiene información sobre splits, por lo que no podemos ajustar las cantidades
         
-        # Convertir columnas numéricas - sin modificar los separadores decimales
         df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce')
         df['Precio Ponderado'] = pd.to_numeric(df['Precio Ponderado'], errors='coerce')
         
@@ -37,7 +37,7 @@ class IOLClient(CommonBroker):
         
         # Convertir precios a USD si están en ARS
         df['Precio USD'] = df.apply(
-            lambda row: self.pesosToUsdCCL(row['Precio Ponderado']) 
+            lambda row: self.pesos_to_usdCCL(row['Precio Ponderado']) 
             if row['Moneda'].upper() == 'AR$' 
             else row['Precio Ponderado'], 
             axis=1
@@ -135,8 +135,8 @@ class IOLClient(CommonBroker):
             if current_price > 0:
                 # Convertir a USD solo si el precio viene del mercado BCBA
                 if row['Market'].upper() == 'BCBA':
-                    current_price = self.pesosToUsdCCL(current_price)
-                    prev_close = self.pesosToUsdCCL(prev_close)
+                    current_price = self.pesos_to_usdCCL(current_price)
+                    prev_close = self.pesos_to_usdCCL(prev_close)
                 
             intraday_change_usd = current_price - prev_close
             intraday_change_pct = (intraday_change_usd / prev_close) * 100 if prev_close > 0 else 0
@@ -148,9 +148,10 @@ class IOLClient(CommonBroker):
     
         return portfolio.drop('Market', axis=1)
 
-    def getPortfolio(self, file_path: str) -> pd.DataFrame:
+    def get_portfolio(self, file_path: str) -> pd.DataFrame:
         """Lee y procesa un archivo de operaciones de IOL"""
         df = self.read_file(file_path)
+        
         positions = self._process_transactions(df)
         
         # Convertir a formato estándar
